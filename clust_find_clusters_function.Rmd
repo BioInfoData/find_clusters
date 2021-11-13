@@ -1,0 +1,193 @@
+---
+title: ""
+output: html_document
+params:
+    cond: ""
+    myGene: ""
+    numRep: ""
+    outDir_tmp: ""
+    do_shuffle: ""
+---
+```{r setup, include=FALSE}
+
+options(stringsAsFactors = F )
+library("raster") 
+library(RColorBrewer)
+library("ggplot2")
+```
+
+```{r functions, include=FALSE}
+################## functions ##############
+
+
+one_cell_myDist= function(data, myRadius,center_cell_row){
+  cordinates <- as.matrix(data[,c("center_x","center_y")])
+  myDist = pointDistance(cordinates[center_cell_row,], cordinates, lonlat=FALSE)
+  myDist = as.data.frame(myDist)
+  myDist$cellID = row.names(myDist)
+  return(myDist)
+}
+
+
+find_clust_2 = function(data, myRadius,center_cell_row, myCluster){
+  if(cells_cluster[center_cell_row,"cluster"] != ""){
+    return()
+  }
+  #mark this cell as belong to cluster
+  cells_cluster[center_cell_row,"cluster"] <<- myCluster
+  #find dist from all cells
+  myDist =one_cell_myDist(data, myRadius,center_cell_row)
+  ind = myDist$myDist <= myRadius
+  radius_cells = myDist[ind,]
+  radius_cells
+  # cells to continue with
+  next_cells =  radius_cells[radius_cells$myDist != 0,]
+  # find if I already see these cells
+  ind_new_cells =  cells_cluster[next_cells$cellID,"cluster"] == ""
+  next_cells = next_cells[ind_new_cells,]
+  if(nrow(next_cells) == 0){
+    return()
+  }else{
+    for(i in 1:length(next_cells$cellID)){
+      center_cell_row = next_cells$cellID[i]
+      find_clust_2(data, myRadius,center_cell_row, myCluster)
+    }
+  }
+}
+
+```
+
+
+```{r params, echo=FALSE}
+######################## main analysis function ###############
+
+cond = params$cond
+myGene = params$myGene
+numRep = params$numRep
+inputDir = params$outDir_tmp
+do_shuffle = params$do_shuffle
+```
+
+# Analysis results of replica `r numRep`
+
+```{r analysis, echo=FALSE}
+
+
+if (do_shuffle == FALSE){
+  myShuffle ="real"
+}else{
+  myShuffle ="SHUFFLED"
+}
+
+myRadius = 190
+
+
+readFileData = paste0(inputDir,"distance_plot_cells_rep_",numRep,"_",myGene, cond,"_",myShuffle,".csv")
+selected = read.csv(readFileData)
+
+data = selected
+row.names(data)= data$cellID
+
+
+cells_cluster <<- data.frame(cellID = data$cellID, cluster = "")
+row.names(cells_cluster) = cells_cluster$cellID
+myCluster =1
+
+for(center_cell_row in as.character(data$cellID)){
+  find_clust_2(data, myRadius,center_cell_row, myCluster)
+  myCluster = myCluster+1
+}
+
+
+cluster_with_cord = merge(data, cells_cluster, by = "cellID")
+cluster_with_cord = cluster_with_cord[,c("cellID","center_x","center_y", "cluster","Egr2")]
+
+num_cell_in_clust = as.data.frame(table(cluster_with_cord$cluster))
+names(num_cell_in_clust) = c("cluster","num_cells")
+cluster_with_cord_num = merge(cluster_with_cord, num_cell_in_clust, by = "cluster")
+
+micron = (myRadius/95)*10
+
+
+bin = c(-1,0,1,4,10,21,44,89, 1000)
+bin_name = c("0","1","2-4","5-10","11-21","22-44","45-89", ">90")
+
+cluster_with_cord_num$numCells_cat = cut(cluster_with_cord_num$num_cells,breaks=bin,bin_name)
+
+## plot clusters
+
+p = ggplot(cluster_with_cord_num, aes(x= center_x, y = center_y, color= factor(numCells_cat))) +
+  geom_point(alpha = 0.5) +
+  ggtitle(paste0("distance: ",micron," micron")) +
+  theme_classic(base_size = 15) +
+  theme(
+        axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank())+
+  labs(color="num cell\nin cluster")
+
+plot(p)
+
+
+### get expression info
+
+gene_for_exp = myGene
+exp_ves_clust = aggregate(cluster_with_cord_num[,gene_for_exp], by =list(cluster_with_cord_num$numCells_cat), mean )
+
+names(exp_ves_clust) = c("numCells_cat","mean_expression")
+p = ggplot(exp_ves_clust, aes(x = factor(numCells_cat), y= mean_expression)) +
+  geom_bar(stat = "identity") +
+  ggtitle(paste0(gene_for_exp, " expression")) +
+  theme_bw(base_size = 15) + xlab("num cells in cluster")
+
+plot(p)
+
+
+cluster_with_cord_num$info = paste0(cluster_with_cord_num$cluster, "_rep",numRep)
+
+# add the non selected cells
+
+readFileData = paste0(inputDir,"distance_plot_cells_rep_",numRep,"_",myGene, cond,"_",myShuffle,"NotSelected.csv")
+NOTselected = read.csv(readFileData)
+
+NOTselected$numCells_cat = "0"
+
+NOTselected = NOTselected[,c(myGene,"numCells_cat")]
+onlySeleceted = cluster_with_cord_num[,c(myGene,"numCells_cat")]
+
+allCells = rbind(NOTselected,onlySeleceted)
+allCells$numCells_cat = factor(allCells$numCells_cat, levels = bin_name)
+
+gene_for_exp = myGene
+exp_ves_clust = aggregate(allCells[,gene_for_exp], by = list(allCells$numCells_cat), mean)
+names(exp_ves_clust) = c("numCells_cat","mean_expression")
+
+
+bin = c(-1,0,1,4,10,1000)
+bin_name = c("0","1","2-4","5-10",">11")
+
+cluster_with_cord_num$numCells_cat = cut(cluster_with_cord_num$num_cells,breaks=bin,bin_name)
+onlySeleceted = cluster_with_cord_num[,c(myGene,"numCells_cat")]
+allCells = rbind(NOTselected,onlySeleceted)
+allCells$numCells_cat = factor(allCells$numCells_cat, levels = bin_name)
+
+exp_ves_clust = aggregate(allCells[,gene_for_exp], by = list(allCells$numCells_cat), mean)
+names(exp_ves_clust) = c("numCells_cat","mean_expression")
+exp_ves_clust_med = aggregate(allCells[,gene_for_exp], by = list(allCells$numCells_cat), median)
+names(exp_ves_clust_med) = c("numCells_cat","median_expression")
+exp_ves_clust = merge(exp_ves_clust,exp_ves_clust_med, by = "numCells_cat")
+exp_ves_clust$myGene = myGene
+
+
+
+
+write.csv(exp_ves_clust, paste(inputDir,"rep", numRep,cond,myGene,"expression_per_cluster.csv", sep = "_"), row.names = F)
+
+# all cells clusred data
+all_cells_cluster_with_exp= cluster_with_cord_num[,c(gene_for_exp,"num_cells")]
+
+
+
+```
