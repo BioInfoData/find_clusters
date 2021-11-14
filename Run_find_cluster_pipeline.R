@@ -1,6 +1,15 @@
 #setwd("/path/to/find_clusters")
 
 
+input_file = "input_example/_merged_1h_Arc_Nr4a1_.csv"
+outDir = "output_example/"
+cond = "1h"
+myGene = "Egr2"
+pos_cut = 6
+reps = c(1:3)
+
+####### Run analysis ##########
+
 options(stringsAsFactors = F )
 
 library("rmarkdown")
@@ -12,16 +21,6 @@ source("clust_find_distance_function.r")
 source("clust_select_cells_function.r")
 source("find_distance_plot_all.r")
 
-
-### params ###
-
-input_file = "input_example/_merged_1h_Arc_Nr4a1_.csv"
-outDir = "output_example/"
-cond = "1h"
-myGene = "Egr2"
-pos_cut = 6
-do_shuffle = FALSE
-reps = c(1:3)
 
 
 ### create output dirs ####
@@ -52,7 +51,7 @@ for (numRep in reps){
   outFile = paste0(outDir,"/",myGene,"_",cond,"_",numRep,".html")
   render(find_cluster, output_dir = outDir, output_file = outFile,
          params = list(outDir_tmp = outDir_tmp, cond = cond, 
-                       myGene =myGene, numRep = numRep, do_shuffle =do_shuffle ))
+                       myGene =myGene, numRep = numRep, do_shuffle =FALSE ))
 }
 
 
